@@ -137,5 +137,67 @@ Tests to update (preserve asserted properties; drop format-internal `["k"]` asse
   Same disease (recursion), one more place. Sizable (touches every node + notation.py).
 - about to commit cold-start wiring (green unit); then report repr finding + offer.
 
+## Iterative output path (in progress, after commit 4bbc1cf)
+Goal: make __repr__ (and later format()) non-recursive so the verifier can echo a
+deep sequent. Wiring already committed + clean tree.
+
+__repr__ approach (mirrors iterative __hash__):
+- Node.__repr__: post-order over children(), build reprs dict by id, each node
+  overrides _repr_with(reprs). Base Node._repr_with raises NotImplementedError. DONE.
+- Each node dataclass: add repr=False to decorator, __repr__ body -> _repr_with(reprs).
+  DONE: Var, Fun, BVar, Eq, Implies, Bottom, Forall. REMAINING: Exists.
+- Sequent.__repr__ (sequent.py): NO change needed -- only 1 level deep, calls repr() on
+  its formulas which is now iterative.
+
+NEXT:
+- Exists._repr_with (last one)
+- run pytest/ruff/pyright; verify CLI now prints a deep valid proof (rc 0, VERIFIED, no traceback)
+- add a test: repr of a 50k-deep term under low recursionlimit doesn't raise
+- commit __repr__ work
+- THEN format() iterative -- HARDER (top-down ctx threading, precedence, binder opens body
+  with fresh name). Not on verifier path (verify uses __repr__, not format). Assess separately.
+
+## __repr__ DONE + committed (9abb6fe)
+- All 8 nodes -> _repr_with + repr=False; Node.__repr__ iterative driver. 313 pass, clean.
+- CLI: 20k-deep VALID proof now rc 0 VERIFIED, no traceback. Output path fixed for repr.
+
+## format() iterative (in progress now)
+Design: Node.format = explicit DFS. work stack of ("eval",node,pprec) / ("combine",fn,nargs);
+parallel values stack. Each node overrides _format_push(ctx,pprec,work): append combine then
+children (reversed so arg0 renders first). Binder mutates ctx on push, its combine restores
+(enter/exit bracket the subtree -- faithful DFS). Base Node.format + _format_push DONE.
+Per-node _format_push: Var DONE, Fun DONE (renamed 2nd closure combine_app to dodge pyright
+redeclare). REMAINING: BVar (raise ValueError dangling), Eq, Implies (Not special), Bottom,
+_format_binder -> _binder_format_push + Forall/Exists.
+Spec to refactor against: tests/test_notation.py has @given round-trips parse(format(x))==x
+over terms()/formulas() -- if output identical, they pass.
+
+NEXT after format: add deep-format test (50k under low recursionlimit); pytest/ruff/pyright;
+commit. format() NOT on verifier path (verify uses repr) but Q wants iterative-everything.
+
+## format() iterative DONE (not yet committed)
+- All node format -> _format_push; Node.format = iterative DFS driver; _format_binder ->
+  _binder_format_push (ctx enter on push, restore in combine). Full suite: 313 pass; notation
+  round-trip property tests (parse(format(x))==x) green -> output identical to recursive form.
+- BUG FOUND + FIXED en route: Forall/Exists decorators were missing repr=False, so dataclass
+  generated a recursive __repr__ shadowing _repr_with. No existing test reprs a quantifier, so
+  it slipped 313-green. Added repr=False to both.
+
+## NEXT (then commit format work)
+- Add 2 regression tests to test_notation.py:
+  (a) repr of forall("x","N",Eq(x,x)) == "(forall :N. #0 = #0)"  [guards the repr=False fix]
+  (b) deep format: format_formula of a 50k-deep Implies chain under recursionlimit=300 doesn't
+      raise. (Use implications NOT nested binders -- binder fresh-naming is O(n^2).)
+- run pytest/ruff/pyright; commit syntax.py + test_notation.py.
+- Then report to Q: repr + format both iterative; verifier echoes deep sequents; quantifier
+  repr bug fixed. Output path fully de-recursed.
+
+## ALL DONE (cold-start commits 4bbc1cf, 9abb6fe, 783daf7)
+- hamblin wired in; JSON gone from verifier front door.
+- __repr__ iterative (9abb6fe). format() iterative + Forall/Exists repr=False bug fixed (783daf7).
+- Full output path de-recursed. 315 pass, ruff + pyright clean. Nested binders verified.
+- Whole pipeline now iterative end to end: decode (hamblin) -> validate -> derive -> sort_check
+  -> repr/format. The only bound is memory.
+
 ## Blocker
-None.
+None. Task complete.
