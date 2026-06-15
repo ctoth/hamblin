@@ -89,5 +89,53 @@ Wire cold-start to depend on hamblin and rip JSON out of the verifier:
   now covers deep input -> clean REJECTED, no RecursionError at the front door.
 - add a cold-start test: 50k-deep proof round-trips through hamblin where json.loads died.
 
+## WIRING cold-start (in progress, 2026-06-15)
+API rename JSON->bytes (delete-first, no shims):
+- syntax.py: DONE. added `import hamblin`; replaced encode_node/_encode_value/decode_node
+  /term_*_dict/formula_*_dict with term_to_bytes/term_from_bytes/formula_to_bytes/
+  formula_from_bytes (hamblin.encode/decode + SYNTAX_REGISTRY, kept). isinstance guard
+  -> ValueError.
+- proof.py: IN PROGRESS. drop `import json`, encode_node/decode_node imports; add
+  `import hamblin`. Replace to_dict/from_dict/to_json/from_json with to_bytes/from_bytes
+  (hamblin + _PROOF_REGISTRY, kept). Also update module docstring "serializable to JSON"
+  -> bytes.
+- verify.py: TODO. read bytes (open 'rb' / sys.stdin.buffer.read()), from_bytes; drop json.
+  except (ValueError,TypeError) already covers HamblinError(=ValueError) -> deep input now
+  cleanly REJECTED, no RecursionError at the front door.
+- pyproject.toml: TODO. dependencies=["hamblin"]; [tool.uv.sources] hamblin={git=...}; uv sync.
+
+Tests to update (preserve asserted properties; drop format-internal `["k"]` asserts; drop JSON names):
+- test_properties.py: imports; *_JSON_EXAMPLES->*_EXAMPLES; 3 "json_kind" tests -> bytes round-trip
+  (keep type+eq, drop ["k"]); lines 184/189/194-196/313/340 to_bytes/from_bytes; determinism
+  to_bytes(pf)==to_bytes(pf). ADD deep-proof (50k) round-trip+check under low recursionlimit.
+- test_checker.py: drop `import json`; import from_bytes/to_bytes; line 329 bytes;
+  _run_verify -> bytes (input=bytes, text=False, decode stdout); forged-axiom test -> to_bytes(
+  P.Axiom(bad)) instead of json.dumps dict.
+
+## Wiring progress (update 2)
+- syntax.py DONE, proof.py DONE, verify.py DONE, pyproject DONE + `uv sync` installed
+  hamblin from git OK.
+- test_properties.py: imports DONE; *_EXAMPLES renamed DONE; 3 kind tests + term/formula/
+  proof roundtrips + determinism rewritten to bytes DONE. REMAINING: lines 307 & 334
+  (from_json(to_json)) -> from_bytes(to_bytes); ADD deep-proof test.
+- test_checker.py: NOT STARTED (drop json import; from_bytes/to_bytes; _run_verify ->
+  bytes input/text=False/decode stdout; forged-axiom -> to_bytes(P.Axiom(bad))).
+- THEN: uv run pytest / ruff / pyright; commit cold-start; commit hamblin notes.
+
+## Wiring DONE + verified (update 3)
+- All source + tests updated. `uv run pytest`: 312 passed. ruff clean. pyright (cold_start) clean.
+- End-to-end CLI proof:
+  - truncated blob   -> rc 1, REJECTED, NO traceback (clean)
+  - garbage bytes    -> rc 1, REJECTED, NO traceback (clean)  <-- front door fixed
+  - deep VALID proof -> CRASHES, but in Fun.__repr__ (syntax.py:304) while PRINTING the
+    "VERIFIED: <sequent>" echo. NOT the trust/decode path (decode+check succeed). Pre-existing:
+    every __repr__/format() recurses; my fix just made it reachable (json.loads used to die first).
+- This is the OUTPUT path, distinct from the wiring goal. Decode+check are iterative & verified.
+
+## REMAINING / FOLLOW-UP (surface to Q, his call)
+- Iterative __repr__ + format() across all nodes so the verifier can echo a deep sequent.
+  Same disease (recursion), one more place. Sizable (touches every node + notation.py).
+- about to commit cold-start wiring (green unit); then report repr finding + offer.
+
 ## Blocker
 None.
