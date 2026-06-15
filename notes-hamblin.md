@@ -74,10 +74,20 @@ encode_to(node, write) ; decode_from(read, registry)  # streaming
   test_properties.py:108 ("truncated input") STILL TODO (replace_all only hit the
   identical-text one).
 
-## NEXT
-- fix last B904 (test_properties.py:108), re-run ruff (expect clean) + pytest
-- git init + commit; gh repo create ctoth/hamblin --public --source . --push
-- FOLLOW-UP: wire cold-start dep, drop json from verify.py
+## DONE
+- ruff clean, pyright clean, 26 pytest pass.
+- committed (6e98c6c), pushed to https://github.com/ctoth/hamblin (public, default branch master).
+- verified `uv add git+https://github.com/ctoth/hamblin` resolves/builds/installs and a
+  round-trip works against the installed package (the physgen->bridgman pattern).
+
+## FOLLOW-UP (not yet done -- separate task)
+Wire cold-start to depend on hamblin and rip JSON out of the verifier:
+- pyproject: dependencies += "hamblin"; [tool.uv.sources] hamblin = { git = "https://github.com/ctoth/hamblin" }
+- syntax.py: replace encode_node/decode_node/term_*_dict/formula_*_dict with hamblin.encode/decode + SYNTAX_REGISTRY
+- proof.py: to_dict/from_dict/to_json/from_json -> hamblin (bytes), _PROOF_REGISTRY
+- verify.py: read bytes (stdin.buffer / 'rb'), drop json import; except (HamblinError=ValueError, TypeError)
+  now covers deep input -> clean REJECTED, no RecursionError at the front door.
+- add a cold-start test: 50k-deep proof round-trips through hamblin where json.loads died.
 
 ## Blocker
 None.
