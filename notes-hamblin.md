@@ -297,5 +297,22 @@ Pipeline fully iterative AND linear end-to-end: hamblin decode -> validate -> de
 sort_check -> repr/format. No call-stack recursion, no O(n^2) anywhere on the path. Only bound
 is memory.
 
+## Iterative Pratt parser (route B) DONE, not yet committed
+- Replaced recursive-descent _Parser in notation.py with iterative precedence-climbing (Pratt):
+  explicit control stack (goals expr/atom + conts loop/combine/close/not/quant/arg), one unified
+  expression grammar over terms+formulas, node constructors enforce typing (-> needs formulas,
+  +/= need terms). (...) is just a grouped expr -> NO speculative backtracking.
+- Binding powers: -> =1 (right-assoc), =/≠ =2, +/- =3, */ =4. not operand prec 2; quant body
+  greedy (prec 0); function args + parse_term at prec 3.
+- Added `cast` import. 319 pass, ruff+pyright clean. Round-trip property tests (parse(format(x))==x)
+  green -> grammar reproduced exactly.
+- Added deep-parse tests under recursionlimit=200: 5000 right-nested implications; 3000 left-nested
+  (deep parens, the old backtracking-recursion case) round-trips. Fixed stale "parser is recursive"
+  comment.
+
+## DONE (cold-start afdf4f6). Parser iterative. Whole pipeline recursion-free end to end:
+parse (Pratt) <-> format/repr (emit-join, O(n)) ; decode (hamblin) -> validate -> derive ->
+sort_check -> repr. Nothing touches the call stack anywhere. Only bound is memory.
+
 ## Blocker
-None. Task complete.
+None. Arc complete.
