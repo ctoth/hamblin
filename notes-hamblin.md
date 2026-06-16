@@ -199,5 +199,70 @@ commit. format() NOT on verifier path (verify uses repr) but Q wants iterative-e
 - Whole pipeline now iterative end to end: decode (hamblin) -> validate -> derive -> sort_check
   -> repr/format. The only bound is memory.
 
+## Binder-naming O(n^2) cleanup (in progress, on top of bfefc51 = user moved format into notation.py)
+- Confirmed quadratic in CURRENT code: format nested-forall depth 500/1000/2000 = 543/2404/9889 ms
+  (2x depth -> 4x time). Cause: _format_binder_push called binder.body.free_vars() per binder
+  (O(subtree) each -> O(n^2)) + _fresh_name scanned growing avoid-set.
+- FIX applied in notation.py:
+  * _Printer: added free (frozenset, whole-formula free names computed once), depth, _names cache,
+    _raw_pos cursor; binder_name(depth) returns depth-th name not in free, O(1) amortized.
+    Removed used field + fresh method + _fresh_name function (delete-first).
+  * _format_node: printer.free = node.free_vars() once at entry.
+  * _format_binder_push: name = printer.binder_name(printer.depth); depth++/restore in combine.
+- Correctness: notation round-trip property tests PASS (11 notation tests green after fix).
+  Depth-indexed names are collision-free (distinct per depth, all avoid free set) -> alpha-equiv
+  round-trips hold.
+- Timing AFTER fix: command output not flushing to background task file (tooling hiccup). Need to
+  re-measure to PROVE linear before claiming. NOT yet verified-quoted.
+
+## NEXT
+- Re-run timing (foreground, maybe write to a file then read) to show linear scaling.
+- Full suite + ruff + pyright. Commit cold-start. Then report.
+
+## REMEASURED: STILL QUADRATIC after first fix (500/1000/2000 = 408/2349/11738 ms)
+Root cause was misdiagnosed. The dominant O(n^2) is `instantiate(binder, Var(name))` per binder
+in _format_binder_push -- each opens an O(subtree) body rebuild. n nested binders -> O(n^2).
+(The free_vars()-per-binder I removed was a SECOND quadratic, real but not the dominant one.)
+
+## REAL FIX (redoing): eliminate instantiate from formatting; render BVar via a scope stack.
+- _Printer: keep free + _names + _raw_pos (depth-indexed naming); REPLACE bound dict + depth with
+  scope: list[(name,sort)] of enclosing binders. depth = len(scope).
+- BVar(i) format: render name of scope[len-1-i] (no sort -- binder shows it). dangling if out of range.
+- Var format: ALWAYS show its sort (it's genuinely free now; no bound-suppression needed, since
+  bound occurrences stay BVar -- we no longer instantiate them into Vars). Output identical.
+- _format_binder_push: push (name,sort) on scope, eval binder.body (ORIGINAL, with BVar), NO
+  instantiate; combine pops scope. O(1) per binder. Whole format O(n).
+- Correctness identical (BVar->name == old opened-Var-with-suppressed-sort). Round-trip tests are spec.
+
+## NEXT
+- implement scope-stack render; re-measure (expect linear); full suite+ruff+pyright; commit.
+
+## Scope-stack fix DONE + correct. Full suite 316 pass, pyright clean, ruff 2 errors (fixing).
+Measured AFTER fix:
+- binders (O(n) build via direct Forall): 1k/2k/4k/8k/16k/32k = 6/7/16/63/232/853 ms
+- implications same depths: 4k/8k/16k/32k = 15/32/75/200 ms
+=> binder now scales like implication. The binder-SPECIFIC quadratics (per-binder free_vars
+   rescan + per-binder instantiate tree-rebuild) are GONE.
+- Residual super-linear cost is GENERAL string assembly: building one big output string by
+  bottom-up nesting f"...{body}" copies the accumulator each level -> O(n^2) char-copies.
+  Affects implications + repr too (NOT binder-specific, pre-existing). Analysis matches numbers
+  (binder ~5*n^2 char-copies).
+
+## DECISION
+Commit the binder-naming/instantiate fix (what Q asked; correct; eliminates binder-specific O(n^2)).
+Report the residual general string-assembly O(n^2) with numbers + offer the emit-to-join rewrite
+(would also speed repr). Don't unilaterally rewrite whole formatter -- bigger, affects repr, Q's call.
+
+## NEXT
+- fix 2 ruff errors in notation.py; commit cold-start; report with before/after numbers + offer.
+
+## DONE: binder formatting O(n^2) eliminated (cold-start b732bfc)
+- scope-stack render (BVar from scope, no instantiate) + depth-indexed names (free computed once).
+- before->after (nested forall, format only): 500/1000/2000 = 544/2404/9890 ms -> 6/7/7 ms.
+- 317 pass, ruff+pyright clean. Added 20k deep-binder format test under recursionlimit=300.
+- RESIDUAL (reported to Q, his call): general string-assembly O(n^2) -- bottom-up f"...{body}"
+  copies accumulator per level; affects repr + nested implications too, NOT binder-specific.
+  Fix would be emit-to-list + join once (also speeds repr). Offered.
+
 ## Blocker
-None. Task complete.
+None. Task complete (pending Q decision on the general string-assembly rewrite).
