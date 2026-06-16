@@ -264,5 +264,38 @@ Report the residual general string-assembly O(n^2) with numbers + offer the emit
   copies accumulator per level; affects repr + nested implications too, NOT binder-specific.
   Fix would be emit-to-list + join once (also speeds repr). Offered.
 
+## emit-and-join rewrite (Q said "of course!") -- IN PROGRESS
+Goal: make format() AND repr() truly O(n) by emitting string fragments left-to-right into a
+list and join() once (no bottom-up f"...{body}" re-wrapping = no O(n^2) char copies).
+
+- notation.py format(): DONE. _format_node -> pre-order emit; work stack of ("emit",node,prec)/
+  ("lit",s)/("pop",); _emit + _emit_fun + _push. Replaced all the combine-based _format_*push.
+  Parens decided top-down from prec; BVar from scope; binder pushes scope, ("pop",) closes after
+  body. pyright clean, 12 notation tests pass. Output identical (parse(format)==x holds).
+- syntax.py repr(): IN PROGRESS. Node.__repr__ -> emit-and-join driver (stack of ("emit",node)/
+  ("lit",s), out list, join once). Base _repr_with -> _repr_emit(out,stack). Added module helper
+  _emit_pieces(stack,pieces)=stack.extend(reversed(pieces)). Converting 8 nodes' _repr_with->
+  _repr_emit: Var DONE. REMAINING: Fun(350), BVar(?), Eq, Implies, Bottom, Forall, Exists.
+  (grep line numbers shifted +~7 after adding _emit_pieces.)
+
+Output must stay byte-identical (existing repr tests + test_quantifier_repr_uses_the_locally_
+nameless_form). Each _repr_emit pushes same literals as old _repr_with f-strings.
+
+## emit-and-join DONE for both format() and repr()
+- format() (notation.py) + repr() (syntax.py, all 8 nodes _repr_emit + Node.__repr__ driver +
+  _emit_pieces helper). No stale _repr_with/_format_push/combine refs.
+- 317 pass, pyright clean, ruff clean. Output identical (round-trip + repr tests green).
+
+## DONE (cold-start b4c7407): format() + repr() now truly O(n)
+- emit-and-join: pre-order walk appends fragments to one list, join once. No bottom-up wrapping.
+- Measured linear (2x depth -> 2x time): format binders 8/16/32/64k = 19/39/79/156 ms
+  (32k was 853ms before -> 79ms). repr nested Fun 8/16/32/64k = 4.9/9.9/20/40 ms.
+- 317 pass, pyright + ruff clean. Output byte-identical (round-trip + repr tests green).
+
+## WHOLE ARC COMPLETE
+Pipeline fully iterative AND linear end-to-end: hamblin decode -> validate -> derive ->
+sort_check -> repr/format. No call-stack recursion, no O(n^2) anywhere on the path. Only bound
+is memory.
+
 ## Blocker
-None. Task complete (pending Q decision on the general string-assembly rewrite).
+None. Task complete.
